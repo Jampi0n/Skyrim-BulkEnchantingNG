@@ -6,6 +6,11 @@ namespace BulkEnchanting {
 	using InventoryItemMap = std::map<TESBoundObject*, std::pair<Count, std::unique_ptr<InventoryEntryData>>>;
 
 	bool IsEnchanted(TESBoundObject* item) {
+		/// <summary>
+		/// Returns true, if the base item is enchanted (not player enchanted).
+		/// </summary>
+		/// <param name="item"></param>
+		/// <returns></returns>
 		if (item->formType == FormType::Armor) {
 			auto armor = static_cast<TESObjectARMO*>(item);
 			return armor->formEnchanting != NULL;
@@ -17,6 +22,11 @@ namespace BulkEnchanting {
 	}
 
 	std::string GetEnchantmentKey(EnchantmentItem* enchantmentItem) {
+		/// <summary>
+		/// Returns a unique string representation of the player enchantment.
+		/// </summary>
+		/// <param name="enchantmentItem"></param>
+		/// <returns></returns>
 		std::string s = "ench";
 		for (auto effect : enchantmentItem->effects) {
 			s += "_" + std::to_string(effect->baseEffect->GetFormID()) + "_" + effect->baseEffect->GetFullName() + "_" + std::to_string(effect->GetMagnitude()) + "_" + std::to_string(effect->GetDuration());
@@ -26,11 +36,21 @@ namespace BulkEnchanting {
 
 	template<typename T>
 	class CountMap {
+		/// <summary>
+		/// Stores counts for each keys.
+		/// Compared to a regular map, it defaults to 0 if the key is not found and simplifies arithmetic operations between CountMaps.
+		/// </summary>
+		/// <typeparam name="T">Key type.</typeparam>
 	private:
 		std::map<T, Count> _countMap;
 		T def;
 	public:
 		void modItem(T item, Count num) {
+			/// <summary>
+			/// Modifies the count of the key.
+			/// </summary>
+			/// <param name="item"></param>
+			/// <param name="num"></param>
 			if (num == 0) {
 				return;
 			}
@@ -47,6 +67,11 @@ namespace BulkEnchanting {
 		}
 
 		Count getItem(T item) {
+			/// <summary>
+			/// Returns the count of the key.
+			/// </summary>
+			/// <param name="item"></param>
+			/// <returns></returns>
 			auto it = _countMap.find(item);
 			if (it == _countMap.end()) {
 				return 0;
@@ -56,10 +81,20 @@ namespace BulkEnchanting {
 		}
 
 		bool hasItem(T item) {
+			/// <summary>
+			/// Returns true, if the key has a positive count.
+			/// </summary>
+			/// <param name="item"></param>
+			/// <returns></returns>
 			return getItem(item) > 0;
 		}
 
 		CountMap<T> mul(Count factor) {
+			/// <summary>
+			/// Returns a new CountMap with multiplied counts.
+			/// </summary>
+			/// <param name="factor"></param>
+			/// <returns></returns>
 			CountMap<T> newMap;
 			if (factor != 0) {
 				for (auto const& [key, val] : _countMap) {
@@ -70,6 +105,11 @@ namespace BulkEnchanting {
 		}
 
 		CountMap<T> add(CountMap<T>* other) {
+			/// <summary>
+			/// Returns a new CountMap with added counts.
+			/// </summary>
+			/// <param name="other"></param>
+			/// <returns></returns>
 			CountMap<T> newMap;
 			for (auto const& [key, val] : _countMap) {
 				newMap.modItem(key, val);
@@ -81,17 +121,34 @@ namespace BulkEnchanting {
 		}
 
 		CountMap<T> sub(CountMap<T>* other) {
+			/// <summary>
+			/// Returns a new CountMap with subtracted counts.
+			/// </summary>
+			/// <param name="other"></param>
+			/// <returns></returns>
 			return add(&other->mul(-1));
 		}
 
 		std::map< T, Count>* getMap() {
+			/// <summary>
+			/// Returns the underlying map to iterate over the entries.
+			/// Keys with counts of 0 are never in the map.
+			/// </summary>
+			/// <returns></returns>
 			return &_countMap;
 		}
 
 		void reset() {
+			/// <summary>
+			/// Removes all keys from the map.
+			/// </summary>
 			_countMap.clear();
 		}
 		bool isSingular() {
+			/// <summary>
+			/// Returns true, if the map contains only a single key with count 1.
+			/// </summary>
+			/// <returns></returns>
 			bool singular = _countMap.size() == 1;
 			if (singular) {
 				for (auto const& [key, val] : _countMap) {
@@ -105,6 +162,10 @@ namespace BulkEnchanting {
 		}
 
 		T getSingular() {
+			/// <summary>
+			/// If the map is singular, it returns the singular key.
+			/// </summary>
+			/// <returns></returns>
 			bool singular = _countMap.size() == 1;
 			if (singular) {
 				for (auto const& [key, val] : _countMap) {
@@ -118,6 +179,38 @@ namespace BulkEnchanting {
 		}
 	};
 
+	/*
+	Inventory:
+	Actor.GetInventory() returns std::map<TESBoundObject*, std::pair<Count, std::unique_ptr<InventoryEntryData>>>
+	The unique pointer cannot be stored and has to be dereferenced immediately.
+	
+
+	item type			optional		 optional list for every sub group within item type	   data specific for this sub group
+
+	TESBoundObject -> InventoryEntryData -> BSSimpleList<ExtraDataList> -> ExtraDataList -> BSExtraData (e.g. Enchantment)
+																		|				 -> BSExtraData (e.g. Soul Level)
+																		|				 -> BSExtraData (e.g. Tempering)
+																		|
+																		-> ExtraDataList
+																		-> ExtraDataList
+																		-> ExtraDataList
+																	   ...
+
+	The inventory is stored in a map using TESBoundObject* as key type. Item forms (Weapons, Armor, Potions, ...) are inherit from TESBoundObject.
+	The key can also be understood to use the FormID of the items.
+	In order to differentiate sub groups of items with the same FormID, extra data is used.
+	An item type (FormID) can have a list of extra data lists (BSSimpleList<ExtraDataList>).
+	Each node in the BSSimpleList refers to one sub group of the item type. Base items do not have nodes in this BSSimpleList.
+	So if the player has one normal iron dagger and one enchanted and simultaneously tempered iron dagger, the TESBoundObject for the iron dagger will have
+	a InventoryEntryData with a BSSimpleList<ExtraDataList> with one node.
+	The ExtraDataList will have two nodes, one to store the enchantment and one to store the tempering.
+	As there are two iron daggers in total, but only one node in the BSSimpleList, the remaining iron dagger has no extra data and is a default iron dagger.
+	A sub group can have multiple items that share their extra data. In that case, the count is stored as another node in the ExtraDataList of this sub group.
+
+
+
+	*/
+
 	class PlayerInventory {
 	public:
 		CountMap<TESBoundObject*> unenchanted;
@@ -127,17 +220,17 @@ namespace BulkEnchanting {
 
 		void AddSoulSize(SOUL_LEVEL size, Count num) {
 			soulGems.modItem(size, num);
-			logger::info("AddSoulSize({},{})", std::to_string(static_cast<int>(size)), std::to_string(num));
+			logger::info("AddSoulSize({},{})", static_cast<int>(size), num);
 		}
 
 		void AddUnenchanted(TESBoundObject* item, Count num) {
 			unenchanted.modItem(item, num);
-			logger::info("AddUnenchanted({},{})", item->GetName(), std::to_string(num));
+			logger::info("AddUnenchanted({},{})", item->GetName(), num);
 		}
 
 		void AddEnchantment(std::string enchKey, Count num) {
 			enchantments.modItem(enchKey, num);
-			logger::info("AddEnchantment({},{})", enchKey, std::to_string(num));
+			logger::info("AddEnchantment({},{})", enchKey, num);
 		}
 
 	public:
@@ -157,24 +250,20 @@ namespace BulkEnchanting {
 						stream << std::hex << soulGem->GetFormID();
 						std::string hexId(stream.str());
 
-						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), std::to_string(num));
+						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), num);
 						if (entryData != NULL) {
-							logger::info("entryData found");
+							logger::info("entryData found x {}", entryData->countDelta);
 							int remaining = num;
 
-							logger::info("{}", std::to_string(static_cast<int>(entryData->GetSoulLevel())));
+							logger::info("{}", static_cast<int>(entryData->GetSoulLevel()));
 							auto extraLists = entryData->extraLists;
 							if (extraLists != NULL) {
 								logger::info("Add list data");
 								for (auto extra : *extraLists) {
-									logger::info("{}", std::to_string(static_cast<int>(extra->GetSoulLevel())));
+									logger::info("{}", static_cast<int>(extra->GetSoulLevel()));
 									AddSoulSize(extra->GetSoulLevel(), extra->GetCount());
 									remaining -= extra->GetCount();
 								}
-							} else {
-								logger::info("Add singular data");
-								AddSoulSize(entryData->GetSoulLevel(), 1);
-								remaining--;
 							}
 							if (remaining > 0) {
 								logger::info("Add remaining default");
@@ -192,11 +281,11 @@ namespace BulkEnchanting {
 						stream << std::hex << key->GetFormID();
 						std::string hexId(stream.str());
 
-						logger::info("[{}] {} x {}", hexId, key->GetName(), std::to_string(num));
+						logger::info("[{}] {} x {}", hexId, key->GetName(), num);
 
 						if (!IsEnchanted(key)) {
 							if (entryData != NULL) {
-								logger::info("entryData found");
+								logger::info("entryData found x {}", entryData->countDelta);
 								int remaining = num;
 								auto extraLists = entryData->extraLists;
 								if (extraLists != NULL) {
@@ -204,7 +293,7 @@ namespace BulkEnchanting {
 									for (auto extra : *extraLists) {
 										auto extraEnch = extra->GetByType(ExtraDataType::kEnchantment);
 										bool enchanted = extraEnch != NULL;
-										logger::info("extra: {} x {}", std::to_string(enchanted), std::to_string(extra->GetCount()));
+										logger::info("extra: {} x {}", enchanted, extra->GetCount());
 										remaining -= extra->GetCount();
 										if (enchanted) {
 											auto ench = static_cast<ExtraEnchantment*>(extraEnch);
@@ -216,11 +305,6 @@ namespace BulkEnchanting {
 											//AddUnenchanted(key, extra->GetCount());
 										}
 									}
-								} else {
-									logger::info("Add singular data");
-									// unenchanted but other extra data
-									//AddUnenchanted(key, 1);
-									remaining--;
 								}
 								if (remaining > 0) {
 									logger::info("Add remaining default");
@@ -235,15 +319,15 @@ namespace BulkEnchanting {
 			}
 			logger::info("Souls:");
 			for (auto const& [key, val] : *soulGems.getMap()) {
-				logger::info("[{}] x {}", std::to_string(static_cast<int>(key)), std::to_string(val));
+				logger::info("[{}] x {}", static_cast<int>(key), val);
 			}
 			logger::info("Enchantments:");
 			for (auto const& [key, val] : *enchantments.getMap()) {
-				logger::info("[{}] x {}", key, std::to_string(val));
+				logger::info("[{}] x {}", key, val);
 			}
 			logger::info("Unenchanted:");
 			for (auto const& [key, val] : *unenchanted.getMap()) {
-				logger::info("[{}] x {}", key->GetName(), std::to_string(val));
+				logger::info("[{}] x {}", key->GetName(), val);
 			}
 		}
 		PlayerInventory(Actor* player) {
@@ -328,15 +412,15 @@ namespace BulkEnchanting {
 		logger::info("Delta");
 		logger::info("Souls:");
 		for (auto const& [key, val] : *usedSouls.getMap()) {
-			logger::info("[{}] x {}", std::to_string(static_cast<int>(key)), std::to_string(val));
+			logger::info("[{}] x {}", static_cast<int>(key), val);
 		}
 		logger::info("Enchantments:");
 		for (auto const& [key, val] : *newEnchantments.getMap()) {
-			logger::info("[{}] x {}", key, std::to_string(val));
+			logger::info("[{}] x {}", val);
 		}
 		logger::info("Unenchanted:");
 		for (auto const& [key, val] : *removedItems.getMap()) {
-			logger::info("[{}] x {}", key->GetName(), std::to_string(val));
+			logger::info("[{}] x {}", key->GetName(), val);
 		}
 
 
@@ -349,7 +433,7 @@ namespace BulkEnchanting {
 			int validSouls = currentPlayerInventory.soulGems.getItem(lastSoul);
 			int validItems = currentPlayerInventory.unenchanted.getItem(lastItem);
 
-			auto tmp =  std::min(validSouls, validItems);
+			auto tmp = std::min(validSouls, validItems);
 			return tmp;
 		} else {
 			logger::info("not singular:");
@@ -364,15 +448,14 @@ namespace BulkEnchanting {
 		auto formID = soulGem->GetFormID();
 		if (formID == 0x00063B27 || formID == 0x00063B29) {
 			player->GetContainer()->AddObjectToContainer(soulGem, 1, player);
-		} 
+		}
 	}
 
 	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
-		logger::info("--------------------- repeat: {}", std::to_string(repeat));
+		logger::info("--------------------- repeat: {}", repeat);
 		auto unique = player->GetInventory();
 
-		if(unique.contains(lastItem))
-		{
+		if (unique.contains(lastItem)) {
 			Count num = unique.at(lastItem).first;
 			auto entryData = unique.at(lastItem).second.get();
 			if (entryData != NULL) {
@@ -384,7 +467,7 @@ namespace BulkEnchanting {
 					for (auto extra : *extraLists) {
 						auto extraEnch = extra->GetByType(ExtraDataType::kEnchantment);
 						bool enchanted = extraEnch != NULL;
-						logger::info("extra: {} x {}", std::to_string(enchanted), std::to_string(extra->GetCount()));
+						logger::info("extra: {} x {}", enchanted, extra->GetCount());
 						remaining -= extra->GetCount();
 						if (enchanted) {
 							auto ench = static_cast<ExtraEnchantment*>(extraEnch);
@@ -420,17 +503,17 @@ namespace BulkEnchanting {
 						stream << std::hex << soulGem->GetFormID();
 						std::string hexId(stream.str());
 
-						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), std::to_string(num));
+						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), num);
 						if (entryData != NULL) {
 							logger::info("entryData found");
 							int remaining = num;
 
-							logger::info("{}", std::to_string(static_cast<int>(entryData->GetSoulLevel())));
+							logger::info("{}", static_cast<int>(entryData->GetSoulLevel()));
 							auto extraLists = entryData->extraLists;
 							if (extraLists != NULL) {
 								logger::info("Add list data");
 								for (auto extra : *extraLists) {
-									logger::info("{}", std::to_string(static_cast<int>(extra->GetSoulLevel())));
+									logger::info("{}", static_cast<int>(extra->GetSoulLevel()));
 									remaining -= extra->GetCount();
 									if (extra->GetSoulLevel() == lastSoul) {
 										logger::info("Remove list soul gems");
@@ -440,14 +523,6 @@ namespace BulkEnchanting {
 										remainingSouls -= remove;
 									}
 								}
-							} else {
-								logger::info("Remove singular soul gem");
-								if (entryData->GetSoulLevel() == lastSoul) {
-									player->RemoveItem(key, 1, ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
-									HandleSoulStar(player, soulGem);
-									remainingSouls--;
-								}
-								remaining--;
 							}
 							if (remaining > 0) {
 								if (soulGem->GetContainedSoul() == lastSoul) {
