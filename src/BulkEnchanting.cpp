@@ -606,6 +606,10 @@ namespace BulkEnchanting {
 	}
 
 	Count OnItemEnchanted(StaticFunctionTag*, Actor* player) {
+		if (lastPlayerInventory == NULL) {
+			return;
+		}
+
 		DataCraftStart();
 		logger::info("--------------------- craft");
 		PlayerInventory currentPlayerInventory(player);
