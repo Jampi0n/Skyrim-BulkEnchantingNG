@@ -378,6 +378,39 @@ namespace BulkEnchanting {
 		}
 	};
 
+	class DebugHelper {
+	public:
+		static void LogItem(TESBoundObject* item, Count num) {
+			if (spdlog::default_logger().get()->level() <= spdlog::level::level_enum::debug) {
+				std::stringstream stream;
+				stream << std::hex << item->GetFormID();
+				std::string hexId(stream.str());
+
+				logger::debug("[{}] {} x {}", hexId, item->GetName(), num);
+			}
+		}
+		static void ListItems(std::string message, CountMap<TESBoundObject*>	unenchanted, CountMap<std::string> enchantments, CountMap<SOUL_LEVEL> soulGems) {
+			if (spdlog::default_logger().get()->level() <= spdlog::level::level_enum::debug) {
+				if (message.compare("") != 0) {
+					logger::debug("{}", message);
+				}
+
+				logger::debug("Souls:");
+				for (auto const& [key, val] : *soulGems.getMap()) {
+					logger::debug("[{}] x {}", static_cast<int>(key), val);
+				}
+				logger::debug("Enchantments:");
+				for (auto const& [key, val] : *enchantments.getMap()) {
+					logger::debug("[{}] x {}", key, val);
+				}
+				logger::debug("Unenchanted:");
+				for (auto const& [key, val] : *unenchanted.getMap()) {
+					logger::debug("[{}] x {}", key->GetName(), val);
+				}
+			}
+		}
+	};
+
 	/*
 	Inventory:
 	Actor.GetInventory() returns std::map<TESBoundObject*, std::pair<Count, std::unique_ptr<InventoryEntryData>>>
@@ -410,6 +443,20 @@ namespace BulkEnchanting {
 
 	*/
 
+	BSExtraData* SubgroupGetEnchantment(ExtraDataList* subgroup) {
+		return subgroup->GetByType(ExtraDataType::kEnchantment);
+	}
+
+	bool SubgroupIsValidForBulk(ExtraDataList* subgroup) {
+		for (auto& xData : *subgroup) {
+			auto xType = xData.GetType();
+			if (xType != ExtraDataType::kTextDisplayData && xType != ExtraDataType::kEnchantment) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	class PlayerInventory {
 	public:
 		CountMap<TESBoundObject*>	unenchanted;	// Unenchanted items without extra data
@@ -419,17 +466,17 @@ namespace BulkEnchanting {
 
 		void AddSoulSize(SOUL_LEVEL size, Count num) {
 			soulGems.modItem(size, num);
-			logger::info("AddSoulSize({},{})", static_cast<int>(size), num);
+			logger::debug("AddSoulSize({},{})", static_cast<int>(size), num);
 		}
 
 		void AddUnenchanted(TESBoundObject* item, Count num) {
 			unenchanted.modItem(item, num);
-			logger::info("AddUnenchanted({},{})", item->GetName(), num);
+			logger::debug("AddUnenchanted({},{})", item->GetName(), num);
 		}
 
 		void AddEnchantment(std::string enchKey, Count num) {
 			enchantments.modItem(enchKey, num);
-			logger::info("AddEnchantment({},{})", enchKey, num);
+			logger::debug("AddEnchantment({},{})", enchKey, num);
 		}
 
 	public:
@@ -444,74 +491,38 @@ namespace BulkEnchanting {
 					auto entryData = val.second.get();
 					if (key->formType == FormType::SoulGem) {
 						TESSoulGem* soulGem = static_cast<TESSoulGem*>(key);
-
-						std::stringstream stream;
-						stream << std::hex << soulGem->GetFormID();
-						std::string hexId(stream.str());
-
-						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), num);
+						DebugHelper::LogItem(soulGem, num);
 						if (entryData != NULL) {
-							logger::info("entryData found x {}", entryData->countDelta);
 							int remaining = num;
-
-							logger::info("{}", static_cast<int>(entryData->GetSoulLevel()));
 							auto extraLists = entryData->extraLists;
 							if (extraLists != NULL) {
-								logger::info("Add list data");
 								for (auto subgroup : *extraLists) {
-									logger::info("{}", static_cast<int>(subgroup->GetSoulLevel()));
 									AddSoulSize(subgroup->GetSoulLevel(), subgroup->GetCount());
 									remaining -= subgroup->GetCount();
 								}
 							}
 							if (remaining > 0) {
-								logger::info("Add remaining default");
 								AddSoulSize(soulGem->GetContainedSoul(), remaining);
 							}
 						} else {
-							logger::info("no entry data found");
-							logger::info("Add all default");
 							AddSoulSize(soulGem->GetContainedSoul(), num);
 						}
-
-
 					} else if (key->formType == FormType::Armor || key->formType == FormType::Weapon) {
-						std::stringstream stream;
-						stream << std::hex << key->GetFormID();
-						std::string hexId(stream.str());
-
-						logger::info("[{}] {} x {}", hexId, key->GetName(), num);
-
+						DebugHelper::LogItem(key, num);
 						if (!IsEnchanted(key)) { // base item must not be enchanted, so it can be enchanted by the player
 							if (entryData != NULL) {
-								logger::info("entryData found x {}", entryData->countDelta);
 								int remaining = num;
 								auto extraLists = entryData->extraLists;
 								if (extraLists != NULL) {
-									logger::info("Add list data");
 									for (auto subgroup : *extraLists) {
-										auto extraEnch = subgroup->GetByType(ExtraDataType::kEnchantment);
-										bool enchanted = extraEnch != NULL;
-										logger::info("extra: {} x {}", enchanted, subgroup->GetCount());
 										remaining -= subgroup->GetCount();
 										// must have kEnchantment extra data and optionally also kTextDisplayData
 										// any other extra data is avoided, as these are the two extra datas that are added by enchanting
-										if (enchanted) {
-											Count numExtraData = 0;
-											bool outerContinue = false;
-											for (auto& xData : *subgroup) {
-												auto xType = xData.GetType();
-												if (xType != ExtraDataType::kTextDisplayData && xType != ExtraDataType::kEnchantment) {
-													outerContinue = true;
-													break;
-												}
+										auto extraEnch = SubgroupGetEnchantment(subgroup);
+										if (extraEnch != NULL) {
+											if (SubgroupIsValidForBulk(subgroup)) {
+												AddEnchantment(GetEnchantmentKey(static_cast<ExtraEnchantment*>(extraEnch)->enchantment), subgroup->GetCount());
 											}
-											if (outerContinue) {
-												continue;
-											}
-											auto ench = static_cast<ExtraEnchantment*>(extraEnch);
-											auto enchKey = GetEnchantmentKey(ench->enchantment);
-											AddEnchantment(enchKey, subgroup->GetCount());
 										}
 									}
 								}
@@ -525,19 +536,9 @@ namespace BulkEnchanting {
 					}
 				}
 			}
-			logger::info("Souls:");
-			for (auto const& [key, val] : *soulGems.getMap()) {
-				logger::info("[{}] x {}", static_cast<int>(key), val);
-			}
-			logger::info("Enchantments:");
-			for (auto const& [key, val] : *enchantments.getMap()) {
-				logger::info("[{}] x {}", key, val);
-			}
-			logger::info("Unenchanted:");
-			for (auto const& [key, val] : *unenchanted.getMap()) {
-				logger::info("[{}] x {}", key->GetName(), val);
-			}
+			DebugHelper::ListItems("Player Inventory Update:", unenchanted, enchantments, soulGems);
 		}
+
 		PlayerInventory(Actor* player) {
 			update(player);
 		}
@@ -553,7 +554,7 @@ namespace BulkEnchanting {
 	Count _crafting = 0;
 
 	void FreeData() {
-		logger::info("------------------------------------- Free");
+		logger::debug("Free");
 		std::free(lastPlayerInventory);
 		lastPlayerInventory = NULL;
 	}
@@ -579,39 +580,34 @@ namespace BulkEnchanting {
 	}
 
 
-
-	void PrintInventory(Actor* player) {
-		PlayerInventory inv(player);
-	}
-
-
-
 	void OnStartEnchanting(StaticFunctionTag*, Actor* player) {
-		logger::info("start");
+		logger::info("OnStartEnchanting");
 		DataMenuOpen();
 		if (lastPlayerInventory == NULL) {
+			logger::debug("new PlayerInventory");
 			lastPlayerInventory = new PlayerInventory(player);
 		} else {
+			logger::debug("update PlayerInventory");
 			lastPlayerInventory->update(player);
 		}
 		lastItem = NULL;
 		lastEnchantment = "";
 		lastSoul = SOUL_LEVEL::kNone;
-		//PrintInventory(player);
 	}
 
 	void OnEndEnchanting(StaticFunctionTag*, Actor* player) {
-		logger::info("end");
+		logger::info("OnEndEnchanting");
 		DataMenuClose();
 	}
 
 	Count OnItemEnchanted(StaticFunctionTag*, Actor* player) {
+		logger::info("OnItemEnchanted");
 		if (lastPlayerInventory == NULL) {
-			return;
+			logger::warn("Previous player inventory unknown, cannot perform Bulk Enchanting.");
+			return 0;
 		}
 
 		DataCraftStart();
-		logger::info("--------------------- craft");
 		PlayerInventory currentPlayerInventory(player);
 		auto usedSouls = lastPlayerInventory->soulGems.sub(&currentPlayerInventory.soulGems);
 		auto newEnchantments = currentPlayerInventory.enchantments.sub(&lastPlayerInventory->enchantments);
@@ -620,26 +616,25 @@ namespace BulkEnchanting {
 		lastPlayerInventory->update(player);
 		DataCraftEnd();
 
-		logger::info("Delta");
-		logger::info("Souls:");
-		for (auto const& [key, val] : *usedSouls.getMap()) {
-			logger::info("[{}] x {}", static_cast<int>(key), val);
-		}
-		logger::info("Enchantments:");
-		for (auto const& [key, val] : *newEnchantments.getMap()) {
-			logger::info("[{}] x {}", key, val);
-		}
-		logger::info("Unenchanted:");
-		for (auto const& [key, val] : *removedItems.getMap()) {
-			logger::info("[{}] x {}", key->GetName(), val);
-		}
+
+		DebugHelper::ListItems("Delta:", removedItems, newEnchantments, usedSouls);
 
 
 		if (usedSouls.isSingular() && newEnchantments.isSingular() && removedItems.isSingular()) {
-			logger::info("singular:");
+			// After enchanting, one soul and one unenchanted item should be gone, while one enchanted item should appear
+			// If this is the case, the entire enchantment process is known and can be repeated
+			logger::debug("singular:");
 			lastSoul = usedSouls.getSingular();
 			lastItem = removedItems.getSingular();
 			lastEnchantment = newEnchantments.getSingular();
+			if (lastSoul == SOUL_LEVEL::kNone) {
+				logger::warn("invalid singular soul");
+				return 0;
+			}
+			if(lastEnchantment.compare("ench") == 0) {
+				logger::warn("invalid singular enchantment");
+				return 0;
+			}
 
 			int validSouls = currentPlayerInventory.soulGems.getItem(lastSoul);
 			int validItems = currentPlayerInventory.unenchanted.getItem(lastItem);
@@ -647,7 +642,7 @@ namespace BulkEnchanting {
 			auto tmp = std::min(validSouls, validItems);
 			return tmp;
 		} else {
-			logger::info("not singular:");
+			logger::debug("not singular:");
 			lastSoul = SOUL_LEVEL::kNone;
 			lastItem = NULL;
 			lastEnchantment = "";
@@ -657,60 +652,47 @@ namespace BulkEnchanting {
 
 	void HandleSoulStar(Actor* player, TESSoulGem* soulGem) {
 		auto formID = soulGem->GetFormID();
+		// Azura's Star and Black Star are added as new forms (empty) to the player if their souls have been used (and the items have been removed in the process)
 		if (formID == 0x00063B27 || formID == 0x00063B29) {
 			player->GetContainer()->AddObjectToContainer(soulGem, 1, player);
 		}
 	}
 
 	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
-		logger::info("--------------------- repeat: {}", repeat);
+		logger::info("RepeatEnchantment({},{},{}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
 		auto unique = player->GetInventory();
 
+		bool foundEnchantment = false;
 		if (unique.contains(lastItem)) {
 			Count num = unique.at(lastItem).first;
 			auto entryData = unique.at(lastItem).second.get();
 			if (entryData != NULL) {
-				logger::info("entryData found");
 				int remaining = num;
 				auto extraLists = entryData->extraLists;
 				if (extraLists != NULL) {
-					logger::info("Add list data");
 					for (auto subgroup : *extraLists) {
-						auto extraEnch = subgroup->GetByType(ExtraDataType::kEnchantment);
-						bool enchanted = extraEnch != NULL;
-						logger::info("extra: {} x {}", enchanted, subgroup->GetCount());
 						remaining -= subgroup->GetCount();
-						if (enchanted) {
-							Count numExtraData = 0;
-							bool outerContinue = false;
-							for (auto& xData : *subgroup) {
-								auto xType = xData.GetType();
-								if (xType != ExtraDataType::kTextDisplayData && xType != ExtraDataType::kEnchantment) {
-									outerContinue = true;
+						auto extraEnch = SubgroupGetEnchantment(subgroup);
+						if (extraEnch != NULL) {
+							if (SubgroupIsValidForBulk(subgroup)) {
+								auto enchKey = GetEnchantmentKey(static_cast<ExtraEnchantment*>(extraEnch)->enchantment);
+								if (enchKey.compare(lastEnchantment) == 0) {
+									foundEnchantment = true;
+									auto xCount = subgroup->GetByType<ExtraCount>();
+									if (!xCount) {
+										xCount = new ExtraCount(1);
+										subgroup->Add(xCount);
+									}
+									xCount->count += repeat;
 									break;
 								}
-							}
-							if (outerContinue) {
-								continue;
-							}
-
-							auto ench = static_cast<ExtraEnchantment*>(extraEnch);
-							auto enchKey = GetEnchantmentKey(ench->enchantment);
-							if (enchKey.compare(lastEnchantment) == 0) {
-								logger::info("Found same enchantment");
-								auto xCount = subgroup->GetByType<ExtraCount>();
-								if (!xCount) {
-									xCount = new ExtraCount(1);
-									subgroup->Add(xCount);
-								}
-								xCount->count += repeat;
-								break;
 							}
 						}
 					}
 				}
 			}
-		} else {
+		}
+		if (!foundEnchantment) {
 			return;
 		}
 
@@ -718,29 +700,18 @@ namespace BulkEnchanting {
 		for (auto const& [key, val] : unique) {
 			Count num = val.first;
 			if (num > 0) {
-				auto entryData = val.second.get();
 				if (key->formType == FormType::SoulGem) {
 					if (remainingSouls > 0) {
+						auto entryData = val.second.get();
 						TESSoulGem* soulGem = static_cast<TESSoulGem*>(key);
-
-						std::stringstream stream;
-						stream << std::hex << soulGem->GetFormID();
-						std::string hexId(stream.str());
-
-						logger::info("[{}] {} x {}", hexId, soulGem->GetName(), num);
+						DebugHelper::LogItem(soulGem, num);
 						if (entryData != NULL) {
-							logger::info("entryData found");
 							int remaining = num;
-
-							logger::info("{}", static_cast<int>(entryData->GetSoulLevel()));
 							auto extraLists = entryData->extraLists;
 							if (extraLists != NULL) {
-								logger::info("Add list data");
 								for (auto subgroup : *extraLists) {
-									logger::info("{}", static_cast<int>(subgroup->GetSoulLevel()));
 									remaining -= subgroup->GetCount();
 									if (subgroup->GetSoulLevel() == lastSoul) {
-										logger::info("Remove list soul gems");
 										Count remove = std::min(subgroup->GetCount(), remainingSouls);
 										player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, subgroup, nullptr);
 										HandleSoulStar(player, soulGem);
@@ -750,7 +721,6 @@ namespace BulkEnchanting {
 							}
 							if (remaining > 0) {
 								if (soulGem->GetContainedSoul() == lastSoul) {
-									logger::info("Remove remaining soul gems");
 									Count remove = std::min(remaining, remainingSouls);
 									player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
 									HandleSoulStar(player, soulGem);
@@ -758,8 +728,6 @@ namespace BulkEnchanting {
 								}
 							}
 						} else {
-							logger::info("no entry data found");
-							logger::info("Remove default soul gems");
 							if (soulGem->GetContainedSoul() == lastSoul) {
 								Count remove = std::min(num, remainingSouls);
 								player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
@@ -767,18 +735,15 @@ namespace BulkEnchanting {
 								remainingSouls -= remove;
 							}
 						}
+					} else {
+						break;
 					}
 				}
 			}
 		}
-		//UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kUpdate, nullptr);
-		//UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kReshow, nullptr);
-		logger::info("RE::UI_MESSAGE_TYPE::kHide");
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-		logger::info("RE::UI_MESSAGE_TYPE::kShow");
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
 		lastPlayerInventory->update(player);
-		logger::info("repeat done");
 	}
 
 	bool RegisterFuncs(BSScript::IVirtualMachine* vm) {
