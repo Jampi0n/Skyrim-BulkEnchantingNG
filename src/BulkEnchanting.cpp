@@ -695,6 +695,9 @@ namespace BulkEnchanting {
 		if (!foundEnchantment) {
 			return;
 		}
+		// This function already considers xp multipliers (e.g. Mage Stone) and the skill settings (Skill Use Mult)
+		// The xp for every enchantment is 1 in vanilla, so it needs to be replaced by repeat
+		PlayerCharacter::GetSingleton()->AddSkillExperience(ActorValue::kEnchanting, repeat);
 
 		Count remainingSouls = repeat;
 		for (auto const& [key, val] : unique) {
