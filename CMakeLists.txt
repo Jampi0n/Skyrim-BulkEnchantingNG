@@ -6,7 +6,7 @@ message("Using toolchain file ${CMAKE_TOOLCHAIN_FILE}.")
 ########################################################################################################################
 project(
         BulkEnchanting
-        VERSION 2.0.0
+        VERSION 1.0.0
         DESCRIPTION "BulkEnchanting"
         LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
