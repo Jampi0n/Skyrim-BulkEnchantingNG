@@ -6,6 +6,57 @@ namespace BulkEnchanting {
 	using Count = int32_t;
 	using InventoryItemMap = std::map<TESBoundObject*, std::pair<Count, std::unique_ptr<InventoryEntryData>>>;
 
+
+	class SoulGemMath {
+	private:
+		std::map<Count, std::vector<ExtraDataList*>> knownTargets;
+		Count flexible = 0;
+	public:
+		SoulGemMath() {
+			Reset();
+		}
+
+		void Reset() {
+			flexible = 0;
+			knownTargets.clear();
+			auto newVector = std::vector< ExtraDataList*>();
+			knownTargets.insert(std::pair<Count, std::vector<ExtraDataList*>>(0, newVector));
+		}
+
+		void AddFlexible(Count num) {
+			flexible += num;
+		}
+
+		void AddGroup(ExtraDataList* subgroup, Count num) {
+			auto newTarget = num;
+			std::vector<std::pair<Count, std::vector<ExtraDataList*>>> addedPairs;
+			for (auto const& [key, val] : knownTargets) {
+				newTarget = key + num;
+				if (!knownTargets.contains(newTarget)) {
+					auto newVector = std::vector< ExtraDataList*>(val);
+					newVector.push_back(subgroup);
+					addedPairs.push_back(std::pair<Count, std::vector<ExtraDataList*>>(newTarget, newVector));
+				}
+			}
+			for (auto& pair : addedPairs) {
+				knownTargets.insert(pair);
+			}
+		}
+
+		std::pair<Count, std::vector<ExtraDataList*>> GetBestVector(Count target) {
+			Count bestTarget = 0;
+			for (auto const& [key, val] : knownTargets) {
+				if (key <= target && key > bestTarget) {
+					bestTarget = key;
+				}
+			}
+
+			auto flex = std::min(target - bestTarget, flexible);
+			return std::pair<Count, std::vector<ExtraDataList*>>(bestTarget + flex, knownTargets.at(bestTarget));
+
+		}
+	};
+
 	bool IsEnchanted(TESBoundObject* item) {
 		/// <summary>
 		/// Returns true, if the base item is enchanted (not player enchanted).
@@ -20,6 +71,10 @@ namespace BulkEnchanting {
 			return weapon->formEnchanting != NULL;
 		}
 		return false;
+	}
+
+	bool IsReusable(TESSoulGem* soulGem) {
+		return soulGem->HasKeywordID(FormID(0xed2f1));
 	}
 
 	ExtraEnchantment* SubgroupGetEnchantment(ExtraDataList* subgroup) {
@@ -149,11 +204,20 @@ namespace BulkEnchanting {
 		CountMap<TESBoundObject*>	unenchanted;	// Unenchanted items without extra data
 		CountMap<std::string>	   enchantments;	// Player made enchantments (extra data) of items with at most Enchantment and Name as extra data
 		CountMap<SOUL_LEVEL>		   soulGems;	// Soul levels
+
+		std::vector<SoulGemMath>   soulGemCount;
+
 	private:
 
-		void AddSoulSize(SOUL_LEVEL size, Count num) {
+		void AddSoulSize(SOUL_LEVEL size, Count num, ExtraDataList* subgroup, bool hasToBeEmptied) {
 			soulGems.modItem(size, num);
-			logger::trace("AddSoulSize({},{})", static_cast<int>(size), num);
+			auto intSize = static_cast<Count>(size);
+			logger::trace("AddSoulSize({},{})", intSize, num);
+			if (subgroup != NULL && num > 1 && hasToBeEmptied) {
+				soulGemCount.at(intSize).AddGroup(subgroup, num);
+			} else {
+				soulGemCount.at(intSize).AddFlexible(num);
+			}
 		}
 
 		void AddUnenchanted(TESBoundObject* item, Count num) {
@@ -171,6 +235,9 @@ namespace BulkEnchanting {
 			unenchanted.reset();
 			enchantments.reset();
 			soulGems.reset();
+			for (auto& e : soulGemCount) {
+				e.Reset();
+			}
 			InventoryItemMap unique = player->GetInventory();
 			for (auto const& [key, val] : unique) {
 				Count num = val.first;
@@ -184,13 +251,19 @@ namespace BulkEnchanting {
 							auto extraLists = entryData->extraLists;
 							if (extraLists != NULL) {
 								for (auto subgroup : *extraLists) {
-									AddSoulSize(subgroup->GetSoulLevel(), subgroup->GetCount());
-									remaining -= subgroup->GetCount();
+									if (SubgroupGetSoul(subgroup) != NULL) {
+										auto defaultLevel = soulGem->GetContainedSoul();
+										auto dynamicLevel = subgroup->GetSoulLevel();
+										if (dynamicLevel != SOUL_LEVEL::kNone && defaultLevel == SOUL_LEVEL::kNone) {
+											AddSoulSize(dynamicLevel, subgroup->GetCount(), subgroup, IsReusable(soulGem));
+											remaining -= subgroup->GetCount();
+										}
+									}
 								}
 							}
 						}
 						if (remaining > 0) {
-							AddSoulSize(soulGem->GetContainedSoul(), remaining);
+							AddSoulSize(soulGem->GetContainedSoul(), remaining, NULL, false);
 						}
 					} else if (key->formType == FormType::Armor || key->formType == FormType::Weapon) {
 						DebugHelper::LogItem(key, num);
@@ -221,6 +294,7 @@ namespace BulkEnchanting {
 		}
 
 		PlayerInventory(Actor* player) {
+			soulGemCount = std::vector<SoulGemMath>(6, SoulGemMath());
 			update(player);
 		}
 	};
@@ -320,8 +394,16 @@ namespace BulkEnchanting {
 			int validSouls = currentPlayerInventory.soulGems.getItem(lastSoul);
 			int validItems = currentPlayerInventory.unenchanted.getItem(lastItem);
 
-			auto tmp = std::min(validSouls, validItems);
-			return tmp;
+			auto maxRepeats = std::min(validSouls, validItems);
+			auto possibleRepeats = currentPlayerInventory.soulGemCount.at(static_cast<Count>(lastSoul)).GetBestVector(maxRepeats).first;
+			logger::debug("maxRepeats={}, possibleRepeats={}", maxRepeats, possibleRepeats);
+			if (possibleRepeats < maxRepeats) {
+				logger::info("Cannot perform maxRepeats, because stacked groups of reusable soul gems cannot be split.");
+				logger::info("    Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
+				logger::info("    Stacked groups can only be emptied as a group, so groups can only be used for bulk enchanting, if the number of enchanted items is large enough.");
+				logger::info("    Newly filled soul gems are generally not stacked and are only stacked once they are moved to chest and back.");
+			}
+			return possibleRepeats;
 		} else {
 			logger::trace("not singular:");
 			lastSoul = SOUL_LEVEL::kNone;
@@ -334,8 +416,19 @@ namespace BulkEnchanting {
 	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat, BGSListForm* reusableList) {
 		reusableList->ClearData();
 		logger::info("RepeatEnchantment({}, {}, {}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
-		auto unique = player->GetInventory();
 
+		// Get updated soul gem information
+		PlayerInventory currentPlayerInventory(player);
+		auto soulGemInfo = currentPlayerInventory.soulGemCount.at(static_cast<Count>(lastSoul)).GetBestVector(repeat);
+		if (soulGemInfo.first < repeat) {
+			logger::error("Trying to repeat ({}) more often than there are valid soul gems ({}).", repeat, soulGemInfo.first);
+			logger::info("    This may be caused by your soul gems being removed from the outside while enchanting.");
+			repeat = soulGemInfo.first;
+		}
+
+
+		// Find newly enchanted item
+		auto unique = player->GetInventory();
 		bool foundEnchantment = false;
 		if (unique.contains(lastItem)) {
 			Count num = unique.at(lastItem).first;
@@ -365,13 +458,35 @@ namespace BulkEnchanting {
 		}
 		if (!foundEnchantment) {
 			logger::error("The enchanted item was not found. Cannot bulk enchant.");
+			logger::info("    This may be caused by our weapons or armor being removed from the outside while enchanting.");
 			return;
 		}
+
 		// This function already considers xp multipliers (e.g. Mage Stone) and the skill settings (Skill Use Mult)
 		// The xp for every enchantment is 1 in vanilla, so it needs to be replaced by repeat
 		PlayerCharacter::GetSingleton()->AddSkillExperience(ActorValue::kEnchanting, repeat);
 
+
+		// Use soul gems
 		Count remainingSouls = repeat;
+
+		// Use grouped soul gems
+		std::vector<ExtraDataList*> groupedSoulGemOrder = soulGemInfo.second;
+		for (auto subgroup : groupedSoulGemOrder) {
+			auto extraSoul = SubgroupGetSoul(subgroup);
+			if (extraSoul == NULL) {
+				logger::error("Soul gem is already empty.");
+			} else {
+				extraSoul->soul = SOUL_LEVEL::kNone;
+				remainingSouls -= subgroup->GetCount();
+			}
+		}
+
+		if (remainingSouls < 0) {
+			logger::error("Too many soul gems have been removed.");
+		}
+
+		// Use flexible soul gems
 		for (auto const& [key, val] : unique) {
 			Count num = val.first;
 			if (num > 0) {
@@ -388,24 +503,25 @@ namespace BulkEnchanting {
 									remaining -= subgroup->GetCount();
 									if (subgroup->GetSoulLevel() == lastSoul) {
 										Count remove = std::min(subgroup->GetCount(), remainingSouls);
-										if (soulGem->HasKeywordID(FormID(0xed2f1))) {
+										if (IsReusable(soulGem)) {
 											// if the soul gem is reusable, set the soul level to 0 in the extra data
 											if (remove < subgroup->GetCount()) {
 												// cannot set soul for only a subset of the subgroup, continue with next subgroup
 											} else {
 												// remove soul from subgroup
-												logger::info("remove soul from subgroup");
 												auto extraSoul = SubgroupGetSoul(subgroup);
 												if (extraSoul == NULL) {
 													logger::error("Soul gem is already empty.");
 												} else {
 													extraSoul->soul = SOUL_LEVEL::kNone;
+													remainingSouls -= remove;
 												}
 											}
 										} else {
 											player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, subgroup, nullptr);
+											remainingSouls -= remove;
 										}
-										remainingSouls -= remove;
+										
 									}
 								}
 							}
@@ -413,7 +529,7 @@ namespace BulkEnchanting {
 						if (remaining > 0) {
 							if (soulGem->GetContainedSoul() == lastSoul) {
 								Count remove = std::min(remaining, remainingSouls);
-								if (soulGem->HasKeywordID(FormID(0xed2f1))) {
+								if (IsReusable(soulGem)) {
 									// if the soul gem is reusable and has no extra data it's just an infinitely full soul gem
 								} else {
 									player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
