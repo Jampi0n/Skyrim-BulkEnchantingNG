@@ -263,7 +263,10 @@ namespace BulkEnchanting {
 							}
 						}
 						if (remaining > 0) {
-							AddSoulSize(soulGem->GetContainedSoul(), remaining, NULL, false);
+							auto defaultLevel = soulGem->GetContainedSoul();
+							if (defaultLevel != SOUL_LEVEL::kNone) {
+								AddSoulSize(defaultLevel, remaining, NULL, false);
+							}
 						}
 					} else if (key->formType == FormType::Armor || key->formType == FormType::Weapon) {
 						DebugHelper::LogItem(key, num);
@@ -402,6 +405,8 @@ namespace BulkEnchanting {
 				logger::info("    Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
 				logger::info("    Stacked groups can only be emptied as a group, so groups can only be used for bulk enchanting, if the number of enchanted items is large enough.");
 				logger::info("    Newly filled soul gems are generally not stacked and are only stacked once they are moved to chest and back.");
+				logger::info("    Note that directly enchanting a stacked reusable soul gem removes souls from the entire group (vanilla bug), so trigger the bulk enchanting with a normal soul of the same size.");
+				logger::info("    You cannot unstack the group without losing the souls. Dropping or removing a portion of the stacked group, removes the souls from that portion (vanilla bug).");
 			}
 			return possibleRepeats;
 		} else {
@@ -413,8 +418,7 @@ namespace BulkEnchanting {
 		}
 	}
 
-	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat, BGSListForm* reusableList) {
-		reusableList->ClearData();
+	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
 		logger::info("RepeatEnchantment({}, {}, {}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
 
 		// Get updated soul gem information
