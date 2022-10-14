@@ -9,7 +9,7 @@ namespace BulkEnchanting {
 		/// </summary>
 		/// <typeparam name="T">Key type.</typeparam>
 	private:
-		std::map<T, Count> _countMap;
+		std::unordered_map<T, Count> _countMap;
 		T def;
 	public:
 		void modItem(T item, Count num) {
@@ -96,7 +96,7 @@ namespace BulkEnchanting {
 			return add(&other->mul(-1));
 		}
 
-		std::map< T, Count>* getMap() {
+		std::unordered_map< T, Count>* getMap() {
 			/// <summary>
 			/// Returns the underlying map to iterate over the entries.
 			/// Keys with counts of 0 are never in the map.

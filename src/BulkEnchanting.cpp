@@ -9,7 +9,7 @@ namespace BulkEnchanting {
 
 	class SoulGemMath {
 	private:
-		std::map<Count, std::vector<ExtraDataList*>> knownTargets;
+		std::unordered_map<Count, std::vector<ExtraDataList*>> knownTargets;
 		Count flexible = 0;
 	public:
 		SoulGemMath() {
