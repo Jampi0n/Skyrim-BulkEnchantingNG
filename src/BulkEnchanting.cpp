@@ -203,20 +203,22 @@ namespace BulkEnchanting {
 	public:
 		CountMap<TESBoundObject*>	unenchanted;	// Unenchanted items without extra data
 		CountMap<std::string>	   enchantments;	// Player made enchantments (extra data) of items with at most Enchantment and Name as extra data
-		CountMap<SOUL_LEVEL>		   soulGems;	// Soul levels
+		CountMap<SOUL_LEVEL>		   soulGems;	// Soul levels used to determine which soul was used to potentially trigger bulk enchanting
 
-		std::vector<SoulGemMath>   soulGemCount;
+		std::vector<SoulGemMath>   soulGemCount;	// Detailed information on the available soul gems for bulk enchanting
 
 	private:
 
-		void AddSoulSize(SOUL_LEVEL size, Count num, ExtraDataList* subgroup, bool hasToBeEmptied) {
+		void AddSoulSize(SOUL_LEVEL size, Count num, ExtraDataList* subgroup, bool hasToBeEmptied, bool canBulkEnchant) {
 			soulGems.modItem(size, num);
 			auto intSize = static_cast<Count>(size);
 			logger::trace("AddSoulSize({},{})", intSize, num);
-			if (subgroup != NULL && num > 1 && hasToBeEmptied) {
-				soulGemCount.at(intSize).AddGroup(subgroup, num);
-			} else {
-				soulGemCount.at(intSize).AddFlexible(num);
+			if (canBulkEnchant) {
+				if (subgroup != NULL && num > 1 && hasToBeEmptied) {
+					soulGemCount.at(intSize).AddGroup(subgroup, num);
+				} else {
+					soulGemCount.at(intSize).AddFlexible(num);
+				}
 			}
 		}
 
@@ -255,7 +257,11 @@ namespace BulkEnchanting {
 										auto defaultLevel = soulGem->GetContainedSoul();
 										auto dynamicLevel = subgroup->GetSoulLevel();
 										if (dynamicLevel != SOUL_LEVEL::kNone && defaultLevel == SOUL_LEVEL::kNone) {
-											AddSoulSize(dynamicLevel, subgroup->GetCount(), subgroup, IsReusable(soulGem));
+											// dynamic soul gems must be initially empty and dynamically filled
+											// if they are reusable, their souls must be emptied on use
+											// the subgroup argument is required to refer to it later, when choosing which groups to empty in case of reusable soul gems,
+											// as the groups have be emptied as a whole, so the correct subgroups need to be chosen to achieve the maximum number of souls
+											AddSoulSize(dynamicLevel, subgroup->GetCount(), subgroup, IsReusable(soulGem), true);
 											remaining -= subgroup->GetCount();
 										}
 									}
@@ -265,7 +271,10 @@ namespace BulkEnchanting {
 						if (remaining > 0) {
 							auto defaultLevel = soulGem->GetContainedSoul();
 							if (defaultLevel != SOUL_LEVEL::kNone) {
-								AddSoulSize(defaultLevel, remaining, NULL, false);
+								// static soul gems must be initially filled
+								// if they are reusable, they cannot be used for bulk enchanting but can still trigger it (because they would keep their soul when bulk enchanting)
+								// YASTM (https://www.nexusmods.com/skyrimspecialedition/mods/56144) contains statically filled reusable soul gems 
+								AddSoulSize(defaultLevel, remaining, NULL, false, !IsReusable(soulGem));
 							}
 						}
 					} else if (key->formType == FormType::Armor || key->formType == FormType::Weapon) {
@@ -401,12 +410,14 @@ namespace BulkEnchanting {
 			auto possibleRepeats = currentPlayerInventory.soulGemCount.at(static_cast<Count>(lastSoul)).GetBestVector(maxRepeats).first;
 			logger::debug("maxRepeats={}, possibleRepeats={}", maxRepeats, possibleRepeats);
 			if (possibleRepeats < maxRepeats) {
-				logger::info("Cannot perform maxRepeats, because stacked groups of reusable soul gems cannot be split.");
-				logger::info("    Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
+				logger::info("Cannot perform maxRepeats, because not all soul gems can be used for bulk enchanting.");
+				logger::info("  1.Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
 				logger::info("    Stacked groups can only be emptied as a group, so groups can only be used for bulk enchanting, if the number of enchanted items is large enough.");
 				logger::info("    Newly filled soul gems are generally not stacked and are only stacked once they are moved to chest and back.");
-				logger::info("    Note that directly enchanting a stacked reusable soul gem removes souls from the entire group (vanilla bug), so trigger the bulk enchanting with a normal soul of the same size.");
+				logger::info("    Note that directly enchanting a stacked reusable soul gem removes souls from the entire group (vanilla bug), so trigger the bulk enchanting with a normal soul of the same size to make use of the stacked souls.");
 				logger::info("    You cannot unstack the group without losing the souls. Dropping or removing a portion of the stacked group, removes the souls from that portion (vanilla bug).");
+				logger::info("  2.Reusable soul gems which are filled by default (e.g. Azura's Star in YASTM:https://www.nexusmods.com/skyrimspecialedition/mods/56144) cannot be used for bulk enchanting.");
+				logger::info("    Note that directly enchanting a stacked reusable soul with YASTM does work correctly and can trigger bulk enchanting.");
 			}
 			return possibleRepeats;
 		} else {
@@ -432,6 +443,14 @@ namespace BulkEnchanting {
 
 
 		// Find newly enchanted item
+		// This may not find the exact item that was enchanted, but it will find one that is equal
+		// SubgroupIsValidForBulk ensures the only allowed extra datas are Name and Enchantment
+		// GetEnchantmentKey ensures these extra datas are the same
+		// If the newly enchanted item has the same name and enchantments as an existing one,
+		// the newly enchanted item will not stack with it until it is removed and added again.
+		// Bulk enchanting may pick the existing item instead of the newly enchanted one,
+		// as they are the same and cannot be distinguished. As a result it will also
+		// not be noticeable.
 		auto unique = player->GetInventory();
 		bool foundEnchantment = false;
 		if (unique.contains(lastItem)) {
@@ -474,7 +493,7 @@ namespace BulkEnchanting {
 		// Use soul gems
 		Count remainingSouls = repeat;
 
-		// Use grouped soul gems
+		// Use grouped && reusable soul gems
 		std::vector<ExtraDataList*> groupedSoulGemOrder = soulGemInfo.second;
 		for (auto subgroup : groupedSoulGemOrder) {
 			auto extraSoul = SubgroupGetSoul(subgroup);
@@ -491,6 +510,9 @@ namespace BulkEnchanting {
 		}
 
 		// Use flexible soul gems
+		// These soul gems can be removed one by one, as they are either not reusable or not grouped
+		// While these reusable groups can still be encountered in the loop, the optimal groups have already been used
+		// and the remaining ones are too large to be used.
 		for (auto const& [key, val] : unique) {
 			Count num = val.first;
 			if (num > 0) {
@@ -510,9 +532,11 @@ namespace BulkEnchanting {
 										if (IsReusable(soulGem)) {
 											// if the soul gem is reusable, set the soul level to 0 in the extra data
 											if (remove < subgroup->GetCount()) {
-												// cannot set soul for only a subset of the subgroup, continue with next subgroup
+												// Cannot set soul for only a subset of the subgroup, continue with next subgroup
 											} else {
-												// remove soul from subgroup
+												// Remove soul from subgroup
+												// This should usually not happen, as all possible reusable groups have already been used and the
+												// remaining ones should be too large.
 												auto extraSoul = SubgroupGetSoul(subgroup);
 												if (extraSoul == NULL) {
 													logger::error("Soul gem is already empty.");
@@ -522,6 +546,8 @@ namespace BulkEnchanting {
 												}
 											}
 										} else {
+											// These are not reusable and can just be removed
+											// The RemoveItem function works with a subgroup argument to remove items from a specific subgroup (even partially)
 											player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, subgroup, nullptr);
 											remainingSouls -= remove;
 										}
@@ -534,11 +560,13 @@ namespace BulkEnchanting {
 							if (soulGem->GetContainedSoul() == lastSoul) {
 								Count remove = std::min(remaining, remainingSouls);
 								if (IsReusable(soulGem)) {
-									// if the soul gem is reusable and has no extra data it's just an infinitely full soul gem
+									// If the soul gem is reusable and has no extra data it's just an infinitely full soul gem
+									// Ignore, these soul gems are not supported for bulk enchanting and there should be enough left that are supported
 								} else {
+									// These are the most normal soul gems that can just be removed
 									player->RemoveItem(key, remove, ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+									remainingSouls -= remove;
 								}
-								remainingSouls -= remove;
 							}
 						}
 					} else {
@@ -550,6 +578,9 @@ namespace BulkEnchanting {
 		if (remainingSouls > 0) {
 			logger::error("Not enough soul gems could be removed.");
 		}
+		// Refresh the enchanting UI
+		// This updates available items and soul gems and updates the xp bar
+		// The menu visibly closes and opens for a moment
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
 		lastPlayerInventory->update(player);
