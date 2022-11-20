@@ -622,11 +622,11 @@ namespace BulkEnchanting {
 	}
 
 	bool RegisterFuncs(BSScript::IVirtualMachine* vm) {
-		vm->RegisterFunction("OnStartEnchanting", "JBulk_NativeFunctions", BulkEnchanting::OnStartEnchanting);
-		vm->RegisterFunction("OnEndEnchanting", "JBulk_NativeFunctions", BulkEnchanting::OnEndEnchanting);
-		vm->RegisterFunction("OnItemEnchanted", "JBulk_NativeFunctions", BulkEnchanting::OnItemEnchanted);
-		vm->RegisterFunction("RepeatEnchantment", "JBulk_NativeFunctions", BulkEnchanting::RepeatEnchantment);
-		vm->RegisterFunction("ConfigPlugin", "JBulk_NativeFunctions", BulkEnchanting::ConfigPlugin);
+		vm->RegisterFunction("OnStartEnchanting", "JBulkR_NativeFunctions", BulkEnchanting::OnStartEnchanting);
+		vm->RegisterFunction("OnEndEnchanting", "JBulkR_NativeFunctions", BulkEnchanting::OnEndEnchanting);
+		vm->RegisterFunction("OnItemEnchanted", "JBulkR_NativeFunctions", BulkEnchanting::OnItemEnchanted);
+		vm->RegisterFunction("RepeatEnchantment", "JBulkR_NativeFunctions", BulkEnchanting::RepeatEnchantment);
+		vm->RegisterFunction("ConfigPlugin", "JBulkR_NativeFunctions", BulkEnchanting::ConfigPlugin);
 		return true;
 	}
 }
