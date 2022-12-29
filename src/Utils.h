@@ -194,4 +194,17 @@ namespace BulkEnchanting {
 		if (xType == ExtraDataType::kUnkBF) { return "0xBF"; }
 		return "";
 	}
+
+	std::string ExtraDataTypeToInfo(ExtraDataType xType) {
+		if (xType == ExtraDataType::kWorn) { return "Item is equipped."; }
+		if (xType == ExtraDataType::kWornLeft) { return "Item is equipped."; }
+		if (xType == ExtraDataType::kHealth) { return "Item is tempered."; }
+		if (xType == ExtraDataType::kPoison) { return "Item is poisoned."; }
+		if (xType == ExtraDataType::kHotkey) { return "Item is favorite."; }
+		if (xType == ExtraDataType::kAliasInstanceArray) { return "Item is referenced by quest."; }
+		if (xType == ExtraDataType::kTextDisplayData) { return "Item is renamed."; }
+		if (xType == ExtraDataType::kEnchantment) { return "Item is already enchanted."; }
+	
+		return "";
+	}
 }

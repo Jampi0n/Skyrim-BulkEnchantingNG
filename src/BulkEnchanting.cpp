@@ -339,7 +339,7 @@ namespace BulkEnchanting {
 	Count _crafting = 0;
 
 	void FreeData() {
-		logger::debug("Free");
+		logger::trace("Free");
 		std::free(lastPlayerInventory);
 		lastPlayerInventory = NULL;
 	}
@@ -366,13 +366,13 @@ namespace BulkEnchanting {
 
 
 	void OnStartEnchanting(StaticFunctionTag*, Actor* player) {
-		logger::debug("OnStartEnchanting");
+		logger::debug("Player activated Enchanting Table...");
 		DataMenuOpen();
 		if (lastPlayerInventory == NULL) {
-			logger::debug("new PlayerInventory");
+            logger::trace("new PlayerInventory");
 			lastPlayerInventory = new PlayerInventory(player);
 		} else {
-			logger::debug("update PlayerInventory");
+			logger::trace("update PlayerInventory");
 			lastPlayerInventory->update(player);
 		}
 		lastItem = NULL;
@@ -381,12 +381,12 @@ namespace BulkEnchanting {
 	}
 
 	void OnEndEnchanting(StaticFunctionTag*, Actor* player) {
-		logger::debug("OnEndEnchanting");
+		logger::debug("Player leaves Enchanting Table.");
 		DataMenuClose();
 	}
 
 	Count OnItemEnchanted(StaticFunctionTag*, Actor* player) {
-		logger::debug("OnItemEnchanted");
+		logger::debug("New item enchanted.");
 		if (lastPlayerInventory == NULL) {
 			logger::warn("Previous player inventory unknown, cannot perform Bulk Enchanting.");
 			return 0;
@@ -423,40 +423,69 @@ namespace BulkEnchanting {
 				return 0;
 			}
 
+			InventoryItemMap unique = player->GetInventory();
+            if (unique.find(lastItem) != unique.end()) {
+                auto& unenchanted = unique.at(lastItem);
+                Count num = unenchanted.first;
+                if (num > 0) {
+                    logger::debug("You have {} {}'s. The following cannot be enchanted:", num, lastItem->GetName());
+                    auto entryData = unenchanted.second.get();
+                    int remaining = num;
+                    if (entryData != NULL) {
+                        auto extraLists = entryData->extraLists;
+                        if (extraLists != NULL) {
+                            for (auto subgroup : *extraLists) {
+                                remaining -= subgroup->GetCount();
+                                auto subgroup = enchantedSubgroups.getSingular();
+                                logger::debug("    {} items cannot be enchanted because of this extra data:", subgroup->GetCount());
+                                for (auto& xData : *subgroup) {
+                                    auto xType = xData.GetType();
+                                    logger::debug("        [{}]: {}", ExtraDataTypeToString(xType), ExtraDataTypeToInfo(xType));
+                                }
+                            }
+                        }
+                    }
+                    logger::debug("The remaining {} items can be enchanted.", remaining);
+                }
+            }
 			int validSouls = currentPlayerInventory.soulGems.getItem(lastSoul);
 			int validItems = currentPlayerInventory.unenchanted.getItem(lastItem);
-
 			auto maxRepeats = std::min(validSouls, validItems);
+            logger::debug("You have {} soul gems of the right appropriate size, resulting in {} possible repeats.",
+                          validSouls, maxRepeats);
+
 			auto possibleRepeats = currentPlayerInventory.soulGemCount.at(static_cast<Count>(lastSoul)).GetBestVector(maxRepeats).first;
-			logger::debug("maxRepeats={}, possibleRepeats={}", maxRepeats, possibleRepeats);
+
 			if (possibleRepeats < maxRepeats) {
-				logger::info("Cannot perform maxRepeats, because not all soul gems can be used for bulk enchanting.");
-				logger::info("  1.Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
-				logger::info("    Stacked groups can only be emptied as a group, so groups can only be used for bulk enchanting, if the number of enchanted items is large enough.");
-				logger::info("    Newly filled soul gems are generally not stacked and are only stacked once they are moved to chest and back.");
-				logger::info("    Note that directly enchanting a stacked reusable soul gem removes souls from the entire group (vanilla bug), so trigger the bulk enchanting with a normal soul of the same size to make use of the stacked souls.");
-				logger::info("    You cannot unstack the group without losing the souls. Dropping or removing a portion of the stacked group, removes the souls from that portion (vanilla bug).");
-				logger::info("  2.Reusable soul gems which are filled by default (e.g. Azura's Star in YASTM:https://www.nexusmods.com/skyrimspecialedition/mods/56144) cannot be used for bulk enchanting.");
-				logger::info("    Note that directly enchanting a stacked reusable soul with YASTM does work correctly and can trigger bulk enchanting.");
+                logger::debug("Only {} of the {} soul gems can be used for bulk enchanting.", possibleRepeats, maxRepeats);
+                logger::debug("  1.Reusable soul gems (e.g. Azura's Star) are emptied instead of being removed.");
+				logger::debug("    Stacked groups can only be emptied as a group, so groups can only be used for bulk enchanting, if the number of enchanted items is large enough.");
+				logger::debug("    Newly filled soul gems are generally not stacked and are only stacked once they are moved to chest and back.");
+				logger::debug("    Note that directly enchanting a stacked reusable soul gem removes souls from the entire group (vanilla bug), so trigger the bulk enchanting with a normal soul of the same size to make use of the stacked souls.");
+				logger::debug("    You cannot unstack the group without losing the souls. Dropping or removing a portion of the stacked group, removes the souls from that portion (vanilla bug).");
+				logger::debug("  2.Reusable soul gems which are filled by default (e.g. Azura's Star in YASTM:https://www.nexusmods.com/skyrimspecialedition/mods/56144) cannot be used for bulk enchanting.");
+				logger::debug("    Note that directly enchanting a stacked reusable soul with YASTM does work correctly and can trigger bulk enchanting.");
 			}
 			return possibleRepeats;
 		} else {
             if (enchantedSubgroups.isSingular()) {
-                logger::info("Cannot use bulk enchanting, because enchanted item has the following extra data:");
+                logger::debug("Cannot use bulk enchanting, because enchanted item has the following extra data:");
                 auto subgroup = enchantedSubgroups.getSingular();
                 for (auto& xData : *subgroup) {
                     auto xType = xData.GetType();
-                    logger::info(" - {}", ExtraDataTypeToString(xType));
+                    if (xType != ExtraDataType::kTextDisplayData && xType != ExtraDataType::kEnchantment) {
+                        logger::debug("    [{}]: {}", ExtraDataTypeToString(xType), ExtraDataTypeToInfo(xType));
+                    }
                 }
             } else {
                 if (!usedSouls.isSingular()) {
-                    logger::info("Cannot use bulk enchanting, because used soul size could not be determined.");
+                    logger::debug("Cannot use bulk enchanting, because used soul size could not be determined.");
 				}
                 if (!newEnchantments.isSingular()) {
-                    logger::info("Cannot use bulk enchanting, because used enchantment could not be determined.");
+                    logger::debug("Cannot use bulk enchanting, because used enchantment could not be determined.");
                 }
 				if (!removedItems.isSingular()) {
-                    logger::info("Cannot use bulk enchanting, because enchanted item could not be determined.");
+                    logger::debug("Cannot use bulk enchanting, because enchanted item could not be determined.");
 				}
 			}
 			logger::trace("not singular:");
@@ -468,7 +497,8 @@ namespace BulkEnchanting {
 	}
 
 	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
-		logger::info("RepeatEnchantment({}, {}, {}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
+		logger::trace("RepeatEnchantment({}, {}, {}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
+        logger::debug("Player decides to use bulk enchanting on {} {} times.", lastItem->GetName(), repeat);
 
 		// Get updated soul gem information
 		PlayerInventory currentPlayerInventory(player);
