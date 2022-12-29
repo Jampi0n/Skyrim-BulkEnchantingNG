@@ -1,5 +1,6 @@
 #include "BulkEnchanting.h"
 #include "CountMap.h"
+#include "Utils.h"
 
 namespace BulkEnchanting {
 
@@ -103,6 +104,11 @@ namespace BulkEnchanting {
 		return xData != NULL;
 	}
 
+	bool SubgroupIsPlayerEnchanted(ExtraDataList* subgroup) {
+        auto xData = subgroup->GetByType(ExtraDataType::kEnchantment);
+        return xData != NULL;
+    }
+
 	std::string GetEnchantmentKey(ExtraDataList* subgroup) {
 		/// <summary>
 		/// Returns a unique string representation of the player enchantment.
@@ -145,7 +151,7 @@ namespace BulkEnchanting {
 				logger::trace("[{}] {} x {}", hexId, item->GetName(), num);
 			}
 		}
-		static void ListItems(std::string message, CountMap<TESBoundObject*>	unenchanted, CountMap<std::string> enchantments, CountMap<SOUL_LEVEL> soulGems) {
+		static void ListItems(std::string message, CountMap<TESBoundObject*>	unenchanted, CountMap<std::string> enchantments, CountMap<SOUL_LEVEL> soulGems, CountMap<ExtraDataList*> enchantedSubgroups) {
 			if (spdlog::default_logger().get()->level() <= spdlog::level::level_enum::trace) {
 				if (message.compare("") != 0) {
 					logger::trace("{}", message);
@@ -159,6 +165,10 @@ namespace BulkEnchanting {
 				for (auto const& [key, val] : *enchantments.getMap()) {
 					logger::trace("[{}] x {}", key, val);
 				}
+                logger::trace("Enchanted Subgroups:");
+                for (auto const& [key, val] : *enchantedSubgroups.getMap()) {
+                    logger::trace("[{}] x {}", static_cast<void*>(key), val);
+                }
 				logger::trace("Unenchanted:");
 				for (auto const& [key, val] : *unenchanted.getMap()) {
 					logger::trace("[{}] x {}", key->GetName(), val);
@@ -201,11 +211,12 @@ namespace BulkEnchanting {
 
 	class PlayerInventory {
 	public:
-		CountMap<TESBoundObject*>	unenchanted;	// Unenchanted items without extra data
-		CountMap<std::string>	   enchantments;	// Player made enchantments (extra data) of items with at most Enchantment and Name as extra data
-		CountMap<SOUL_LEVEL>		   soulGems;	// Soul levels used to determine which soul was used to potentially trigger bulk enchanting
+        CountMap<ExtraDataList*> enchantedSubgroups;    // Enchanted items
+		CountMap<TESBoundObject*>		unenchanted;	// Unenchanted items without extra data
+		CountMap<std::string>		   enchantments;	// Player made enchantments (extra data) of items with at most Enchantment and Name as extra data
+		CountMap<SOUL_LEVEL>		       soulGems;	// Soul levels used to determine which soul was used to potentially trigger bulk enchanting
 
-		std::vector<SoulGemMath>   soulGemCount;	// Detailed information on the available soul gems for bulk enchanting
+		std::vector<SoulGemMath>       soulGemCount;	// Detailed information on the available soul gems for bulk enchanting
 
 	private:
 
@@ -227,6 +238,10 @@ namespace BulkEnchanting {
 			logger::trace("AddUnenchanted({},{})", item->GetName(), num);
 		}
 
+		void AddEnchanted(ExtraDataList* item, Count num) {
+            enchantedSubgroups.modItem(item, num);
+        }
+
 		void AddEnchantment(std::string enchKey, Count num) {
 			enchantments.modItem(enchKey, num);
 			logger::trace("AddEnchantment({},{})", enchKey, num);
@@ -234,6 +249,7 @@ namespace BulkEnchanting {
 
 	public:
 		void update(Actor* player) {
+            enchantedSubgroups.reset();
 			unenchanted.reset();
 			enchantments.reset();
 			soulGems.reset();
@@ -291,7 +307,9 @@ namespace BulkEnchanting {
 										if (SubgroupIsValidForBulk(subgroup)) {
 											AddEnchantment(GetEnchantmentKey(subgroup), subgroup->GetCount());
 										}
-
+                                        if (SubgroupIsPlayerEnchanted(subgroup)) {
+                                            AddEnchanted(subgroup, subgroup->GetCount());
+										}
 									}
 								}
 							}
@@ -302,7 +320,7 @@ namespace BulkEnchanting {
 					}
 				}
 			}
-			DebugHelper::ListItems("Player Inventory Update:", unenchanted, enchantments, soulGems);
+            DebugHelper::ListItems("Player Inventory Update:", unenchanted, enchantments, soulGems, enchantedSubgroups);
 		}
 
 		PlayerInventory(Actor* player) {
@@ -378,13 +396,15 @@ namespace BulkEnchanting {
 		PlayerInventory currentPlayerInventory(player);
 		auto usedSouls = lastPlayerInventory->soulGems.sub(&currentPlayerInventory.soulGems);
 		auto newEnchantments = currentPlayerInventory.enchantments.sub(&lastPlayerInventory->enchantments);
+        auto enchantedSubgroups = currentPlayerInventory.enchantedSubgroups.sub(&lastPlayerInventory->enchantedSubgroups);
 		auto removedItems = lastPlayerInventory->unenchanted.sub(&currentPlayerInventory.unenchanted);
 
 		lastPlayerInventory->update(player);
 		DataCraftEnd();
 
 
-		DebugHelper::ListItems("Delta:", removedItems, newEnchantments, usedSouls);
+		DebugHelper::ListItems("Delta:", removedItems, newEnchantments, usedSouls, enchantedSubgroups);
+
 
 
 		if (usedSouls.isSingular() && newEnchantments.isSingular() && removedItems.isSingular()) {
@@ -421,6 +441,24 @@ namespace BulkEnchanting {
 			}
 			return possibleRepeats;
 		} else {
+            if (enchantedSubgroups.isSingular()) {
+                logger::info("Cannot use bulk enchanting, because enchanted item has the following extra data:");
+                auto subgroup = enchantedSubgroups.getSingular();
+                for (auto& xData : *subgroup) {
+                    auto xType = xData.GetType();
+                    logger::info(" - {}", ExtraDataTypeToString(xType));
+                }
+            } else {
+                if (!usedSouls.isSingular()) {
+                    logger::info("Cannot use bulk enchanting, because used soul size could not be determined.");
+				}
+                if (!newEnchantments.isSingular()) {
+                    logger::info("Cannot use bulk enchanting, because used enchantment could not be determined.");
+                }
+				if (!removedItems.isSingular()) {
+                    logger::info("Cannot use bulk enchanting, because enchanted item could not be determined.");
+				}
+			}
 			logger::trace("not singular:");
 			lastSoul = SOUL_LEVEL::kNone;
 			lastItem = NULL;
