@@ -428,7 +428,7 @@ namespace BulkEnchanting {
                 auto& unenchanted = unique.at(lastItem);
                 Count num = unenchanted.first;
                 if (num > 0) {
-                    logger::debug("You have {} {}'s. The following cannot be enchanted:", num, lastItem->GetName());
+                    logger::debug("You have {} {}'s. The following cannot be enchanted (this should always include the item that was just enchanted):", num, lastItem->GetName());
                     auto entryData = unenchanted.second.get();
                     int remaining = num;
                     if (entryData != NULL) {
@@ -436,7 +436,6 @@ namespace BulkEnchanting {
                         if (extraLists != NULL) {
                             for (auto subgroup : *extraLists) {
                                 remaining -= subgroup->GetCount();
-                                auto subgroup = enchantedSubgroups.getSingular();
                                 logger::debug("    {} items cannot be enchanted because of this extra data:", subgroup->GetCount());
                                 for (auto& xData : *subgroup) {
                                     auto xType = xData.GetType();
@@ -496,7 +495,7 @@ namespace BulkEnchanting {
 		}
 	}
 
-	void RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
+	Count RepeatEnchantment(StaticFunctionTag*, Actor* player, Count repeat) {
 		logger::trace("RepeatEnchantment({}, {}, {}) x {}", lastItem->GetName(), lastEnchantment, static_cast<int>(lastSoul), repeat);
         logger::debug("Player decides to use bulk enchanting on {} {} times.", lastItem->GetName(), repeat);
 
@@ -550,7 +549,7 @@ namespace BulkEnchanting {
 		if (!foundEnchantment) {
 			logger::error("The enchanted item was not found. Cannot bulk enchant.");
 			logger::info("    This may be caused by our weapons or armor being removed from the outside while enchanting.");
-			return;
+			return 0;
 		}
 
 		// This function already considers xp multipliers (e.g. Mage Stone) and the skill settings (Skill Use Mult)
@@ -652,6 +651,7 @@ namespace BulkEnchanting {
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
 		UIMessageQueue::GetSingleton()->AddMessage(CraftingMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
 		lastPlayerInventory->update(player);
+        return repeat;
 	}
 
 	void  ConfigPlugin(StaticFunctionTag*, Count logLevel) {
