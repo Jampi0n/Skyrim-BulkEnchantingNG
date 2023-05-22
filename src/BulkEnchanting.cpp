@@ -594,7 +594,13 @@ namespace BulkEnchanting {
 							if (extraLists != NULL) {
 								for (auto subgroup : *extraLists) {
 									remaining -= subgroup->GetCount();
-									if (subgroup->GetSoulLevel() == lastSoul) {
+
+									auto defaultLevel = soulGem->GetContainedSoul();
+                                    auto dynamicLevel = subgroup->GetSoulLevel();
+
+                                    auto soulLevel = dynamicLevel != SOUL_LEVEL::kNone ? dynamicLevel : defaultLevel;
+
+									if (soulLevel == lastSoul) {
 										Count remove = std::min(subgroup->GetCount(), remainingSouls);
 										if (IsReusable(soulGem)) {
 											// if the soul gem is reusable, set the soul level to 0 in the extra data
