@@ -6,7 +6,7 @@ message("Using toolchain file ${CMAKE_TOOLCHAIN_FILE}.")
 ########################################################################################################################
 project(
         BulkEnchantingRedone
-        VERSION 1.2.0
+        VERSION 1.2.1
         DESCRIPTION "BulkEnchantingRedone"
         LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
