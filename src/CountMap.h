@@ -33,7 +33,7 @@ namespace BulkEnchanting {
 			}
 		}
 
-		Count getItem(T item) {
+		Count getItem(T item) const {
 			/// <summary>
 			/// Returns the count of the key.
 			/// </summary>
@@ -47,7 +47,7 @@ namespace BulkEnchanting {
 			}
 		}
 
-		bool hasItem(T item) {
+		bool hasItem(T item) const {
 			/// <summary>
 			/// Returns true, if the key has a positive count.
 			/// </summary>
@@ -56,7 +56,7 @@ namespace BulkEnchanting {
 			return getItem(item) > 0;
 		}
 
-		CountMap<T> mul(Count factor) {
+		CountMap<T> mul(Count factor) const {
 			/// <summary>
 			/// Returns a new CountMap with multiplied counts.
 			/// </summary>
@@ -71,7 +71,7 @@ namespace BulkEnchanting {
 			return newMap;
 		}
 
-		CountMap<T> add(CountMap<T>* other) {
+		CountMap<T> add(CountMap<T>& other) const {
 			/// <summary>
 			/// Returns a new CountMap with added counts.
 			/// </summary>
@@ -81,28 +81,29 @@ namespace BulkEnchanting {
 			for (auto const& [key, val] : _countMap) {
 				newMap.modItem(key, val);
 			}
-			for (auto const& [key, val] : other->_countMap) {
+			for (auto const& [key, val] : other._countMap) {
 				newMap.modItem(key, val);
 			}
 			return newMap;
 		}
 
-		CountMap<T> sub(CountMap<T>* other) {
+		CountMap<T> sub(const CountMap<T> &other) const {
 			/// <summary>
 			/// Returns a new CountMap with subtracted counts.
 			/// </summary>
 			/// <param name="other"></param>
 			/// <returns></returns>
-			return add(&other->mul(-1));
+            CountMap<T> negated = other.mul(-1);
+			return add(negated);
 		}
 
-		std::unordered_map< T, Count>* getMap() {
+		const std::unordered_map<T, Count>& getMap() const {
 			/// <summary>
 			/// Returns the underlying map to iterate over the entries.
 			/// Keys with counts of 0 are never in the map.
 			/// </summary>
 			/// <returns></returns>
-			return &_countMap;
+			return _countMap;
 		}
 
 		void reset() {
@@ -111,7 +112,7 @@ namespace BulkEnchanting {
 			/// </summary>
 			_countMap.clear();
 		}
-		bool isSingular() {
+		bool isSingular() const {
 			/// <summary>
 			/// Returns true, if the map contains only a single key with count 1.
 			/// </summary>
@@ -128,7 +129,7 @@ namespace BulkEnchanting {
 			return false;
 		}
 
-		T getSingular() {
+		T getSingular() const {
 			/// <summary>
 			/// If the map is singular, it returns the singular key.
 			/// </summary>

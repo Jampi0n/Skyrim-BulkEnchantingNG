@@ -154,19 +154,19 @@ namespace BulkEnchanting {
                 }
 
                 logger::trace("Souls:");
-                for (auto const& [key, val] : *soulGems.getMap()) {
+                for (auto const& [key, val] : soulGems.getMap()) {
                     logger::trace("[{}] x {}", static_cast<int>(key), val);
                 }
                 logger::trace("Enchantments:");
-                for (auto const& [key, val] : *enchantments.getMap()) {
+                for (auto const& [key, val] : enchantments.getMap()) {
                     logger::trace("[{}] x {}", key, val);
                 }
                 logger::trace("Enchanted Subgroups:");
-                for (auto const& [key, val] : *enchantedSubgroups.getMap()) {
+                for (auto const& [key, val] : enchantedSubgroups.getMap()) {
                     logger::trace("[{}] x {}", static_cast<void*>(key), val);
                 }
                 logger::trace("Unenchanted:");
-                for (auto const& [key, val] : *unenchanted.getMap()) {
+                for (auto const& [key, val] : unenchanted.getMap()) {
                     logger::trace("[{}] x {}", key->GetName(), val);
                 }
             }
@@ -392,11 +392,11 @@ namespace BulkEnchanting {
 
         DataCraftStart();
         PlayerInventory currentPlayerInventory(player);
-        auto usedSouls = lastPlayerInventory->soulGems.sub(&currentPlayerInventory.soulGems);
-        auto newEnchantments = currentPlayerInventory.enchantments.sub(&lastPlayerInventory->enchantments);
+        auto usedSouls = lastPlayerInventory->soulGems.sub(currentPlayerInventory.soulGems);
+        auto newEnchantments = currentPlayerInventory.enchantments.sub(lastPlayerInventory->enchantments);
         auto enchantedSubgroups =
-            currentPlayerInventory.enchantedSubgroups.sub(&lastPlayerInventory->enchantedSubgroups);
-        auto removedItems = lastPlayerInventory->unenchanted.sub(&currentPlayerInventory.unenchanted);
+            currentPlayerInventory.enchantedSubgroups.sub(lastPlayerInventory->enchantedSubgroups);
+        auto removedItems = lastPlayerInventory->unenchanted.sub(currentPlayerInventory.unenchanted);
 
         lastPlayerInventory->update(player);
         DataCraftEnd();
